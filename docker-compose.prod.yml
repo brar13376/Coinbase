@@ -1,0 +1,468 @@
+version: '3.8'
+
+services:
+  # Database Services
+  postgres:
+    image: postgres:15-alpine
+    container_name: coinbase-clone-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: coinbase_clone
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - coinbase-network
+
+  mongodb:
+    image: mongo:6.0
+    container_name: coinbase-clone-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: coinbase_clone
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - coinbase-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: coinbase-clone-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - coinbase-network
+
+  # Message Queue
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: coinbase-clone-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    networks:
+      - coinbase-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: coinbase-clone-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - coinbase-network
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-api-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_SERVICE_URL: http://auth-service:5001
+      USER_SERVICE_URL: http://user-service:5002
+      ORDER_SERVICE_URL: http://order-service:5003
+      WALLET_SERVICE_URL: http://wallet-service:5004
+      MARKET_DATA_SERVICE_URL: http://market-data-service:5005
+      KYC_SERVICE_URL: http://kyc-service:5006
+      FIAT_SERVICE_URL: http://fiat-service:5007
+      ADMIN_SERVICE_URL: http://admin-service:5008
+      NOTIFICATION_SERVICE_URL: http://notification-service:5009
+    depends_on:
+      - redis
+      - auth-service
+      - user-service
+      - order-service
+      - wallet-service
+      - market-data-service
+      - kyc-service
+      - fiat-service
+      - admin-service
+      - notification-service
+    networks:
+      - coinbase-network
+
+  # Microservices
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-auth-service
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      NODE_ENV: production
+      PORT: 5001
+      MONGODB_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/coinbase-clone-auth?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-user-service
+    restart: unless-stopped
+    ports:
+      - "5002:5002"
+    environment:
+      NODE_ENV: production
+      PORT: 5002
+      MONGODB_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/coinbase-clone-users?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  order-service:
+    build:
+      context: ./services/order-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-order-service
+    restart: unless-stopped
+    ports:
+      - "5003:5003"
+    environment:
+      NODE_ENV: production
+      PORT: 5003
+      MONGODB_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/coinbase-clone-orders?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  wallet-service:
+    build:
+      context: ./services/wallet-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-wallet-service
+    restart: unless-stopped
+    ports:
+      - "5004:5004"
+    environment:
+      NODE_ENV: production
+      PORT: 5004
+      MONGODB_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/coinbase-clone-wallets?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  market-data-service:
+    build:
+      context: ./services/market-data-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-market-data-service
+    restart: unless-stopped
+    ports:
+      - "5005:5005"
+    environment:
+      NODE_ENV: production
+      PORT: 5005
+      MONGODB_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/coinbase-clone-market-data?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  kyc-service:
+    build:
+      context: ./services/kyc-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-kyc-service
+    restart: unless-stopped
+    ports:
+      - "5006:5006"
+    environment:
+      NODE_ENV: production
+      PORT: 5006
+      MONGODB_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/coinbase-clone-kyc?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  fiat-service:
+    build:
+      context: ./services/fiat-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-fiat-service
+    restart: unless-stopped
+    ports:
+      - "5007:5007"
+    environment:
+      NODE_ENV: production
+      PORT: 5007
+      MONGODB_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/coinbase-clone-fiat?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  admin-service:
+    build:
+      context: ./services/admin-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-admin-service
+    restart: unless-stopped
+    ports:
+      - "5008:5008"
+    environment:
+      NODE_ENV: production
+      PORT: 5008
+      MONGODB_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/coinbase-clone-admin?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-notification-service
+    restart: unless-stopped
+    ports:
+      - "5009:5009"
+    environment:
+      NODE_ENV: production
+      PORT: 5009
+      MONGODB_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/coinbase-clone-notifications?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  ledger-service:
+    build:
+      context: ./services/ledger-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-ledger-service
+    restart: unless-stopped
+    ports:
+      - "5010:5010"
+    environment:
+      NODE_ENV: production
+      PORT: 5010
+      POSTGRES_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/coinbase_clone_ledger
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  custody-service:
+    build:
+      context: ./services/custody-service
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-custody-service
+    restart: unless-stopped
+    ports:
+      - "5011:5011"
+    environment:
+      NODE_ENV: production
+      PORT: 5011
+      MONGODB_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/coinbase-clone-custody?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    networks:
+      - coinbase-network
+
+  # Frontend
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: coinbase-clone-client
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:3000/api
+    depends_on:
+      - api-gateway
+    networks:
+      - coinbase-network
+
+  # Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: coinbase-clone-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - coinbase-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: coinbase-clone-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - coinbase-network
+
+  # Logging
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    container_name: coinbase-clone-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - coinbase-network
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.8.0
+    container_name: coinbase-clone-kibana
+    restart: unless-stopped
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - coinbase-network
+
+  # Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: coinbase-clone-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./client/build:/usr/share/nginx/html
+    depends_on:
+      - api-gateway
+      - client
+    networks:
+      - coinbase-network
+
+volumes:
+  postgres_data:
+  mongodb_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  elasticsearch_data:
+
+networks:
+  coinbase-network:
+    driver: bridge
