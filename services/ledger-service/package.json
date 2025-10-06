@@ -1,0 +1,33 @@
+{
+  "name": "coinbase-clone-ledger-service",
+  "version": "1.0.0",
+  "description": "Ledger service for transaction management and audit logging",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "mongoose": "^8.0.3",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "dotenv": "^16.3.1",
+    "winston": "^3.11.0",
+    "compression": "^1.7.4",
+    "morgan": "^1.10.0",
+    "redis": "^4.6.10",
+    "kafkajs": "^2.2.4",
+    "uuid": "^9.0.1",
+    "decimal.js": "^10.4.3",
+    "pg": "^8.11.3",
+    "sequelize": "^6.35.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0"
+  }
+}
