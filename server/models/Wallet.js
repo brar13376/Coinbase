@@ -1,138 +1,64 @@
-const mongoose = require('mongoose');
-const crypto = require('crypto');
+// In-memory storage for development
+const wallets = new Map();
+let nextId = 1;
 
-const walletSchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  currency: {
-    type: String,
-    required: true,
-    uppercase: true
-  },
-  balance: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-  lockedBalance: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-  address: {
-    type: String,
-    required: function() {
-      return this.currency !== 'USD' && this.currency !== 'EUR';
-    }
-  },
-  privateKey: {
-    type: String,
-    required: function() {
-      return this.currency !== 'USD' && this.currency !== 'EUR';
-    }
-  },
-  publicKey: {
-    type: String,
-    required: function() {
-      return this.currency !== 'USD' && this.currency !== 'EUR';
-    }
-  },
-  mnemonic: {
-    type: String,
-    required: function() {
-      return this.currency !== 'USD' && this.currency !== 'EUR';
-    }
-  },
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  lastTransaction: Date,
-  transactionCount: {
-    type: Number,
-    default: 0
+class Wallet {
+  constructor(data) {
+    this._id = nextId++;
+    this.userId = data.userId;
+    this.currency = data.currency;
+    this.balance = data.balance || 0;
+    this.lockedBalance = data.lockedBalance || 0;
+    this.address = data.address;
+    this.privateKey = data.privateKey;
+    this.isActive = data.isActive !== undefined ? data.isActive : true;
+    this.createdAt = new Date();
+    this.updatedAt = new Date();
   }
-}, {
-  timestamps: true
-});
 
-// Indexes
-walletSchema.index({ userId: 1, currency: 1 }, { unique: true });
-walletSchema.index({ address: 1 });
-walletSchema.index({ currency: 1 });
-
-// Virtual for available balance
-walletSchema.virtual('availableBalance').get(function() {
-  return this.balance - this.lockedBalance;
-});
-
-// Method to generate wallet address and keys
-walletSchema.methods.generateWallet = function() {
-  if (this.currency === 'USD' || this.currency === 'EUR') {
-    return; // Fiat currencies don't need blockchain addresses
+  async save() {
+    this.updatedAt = new Date();
+    wallets.set(this._id, this);
+    return this;
   }
-  
-  // Generate a random private key (32 bytes)
-  const privateKey = crypto.randomBytes(32).toString('hex');
-  this.privateKey = privateKey;
-  
-  // Generate public key from private key (simplified)
-  const publicKey = crypto.createHash('sha256').update(privateKey).digest('hex');
-  this.publicKey = publicKey;
-  
-  // Generate address from public key (simplified)
-  this.address = '0x' + crypto.createHash('sha256').update(publicKey).digest('hex').substring(0, 40);
-  
-  // Generate mnemonic (simplified - in production, use proper BIP39)
-  this.mnemonic = crypto.randomBytes(16).toString('hex');
-};
 
-// Method to add balance
-walletSchema.methods.addBalance = function(amount) {
-  if (amount <= 0) throw new Error('Amount must be positive');
-  this.balance += amount;
-  this.lastTransaction = new Date();
-  this.transactionCount += 1;
-};
+  static async findOne(query) {
+    for (const wallet of wallets.values()) {
+      if (query.userId && wallet.userId === query.userId) {
+        return wallet;
+      }
+      if (query._id && wallet._id === query._id) {
+        return wallet;
+      }
+      if (query.address && wallet.address === query.address) {
+        return wallet;
+      }
+    }
+    return null;
+  }
 
-// Method to subtract balance
-walletSchema.methods.subtractBalance = function(amount) {
-  if (amount <= 0) throw new Error('Amount must be positive');
-  if (this.availableBalance < amount) throw new Error('Insufficient balance');
-  this.balance -= amount;
-  this.lastTransaction = new Date();
-  this.transactionCount += 1;
-};
+  static async find(query = {}) {
+    const results = [];
+    for (const wallet of wallets.values()) {
+      let matches = true;
+      for (const [key, value] of Object.entries(query)) {
+        if (wallet[key] !== value) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        results.push(wallet);
+      }
+    }
+    return results;
+  }
 
-// Method to lock balance
-walletSchema.methods.lockBalance = function(amount) {
-  if (amount <= 0) throw new Error('Amount must be positive');
-  if (this.availableBalance < amount) throw new Error('Insufficient available balance');
-  this.lockedBalance += amount;
-};
+  static async create(data) {
+    const wallet = new this(data);
+    await wallet.save();
+    return wallet;
+  }
+}
 
-// Method to unlock balance
-walletSchema.methods.unlockBalance = function(amount) {
-  if (amount <= 0) throw new Error('Amount must be positive');
-  if (this.lockedBalance < amount) throw new Error('Insufficient locked balance');
-  this.lockedBalance -= amount;
-};
-
-// Method to get wallet summary
-walletSchema.methods.getSummary = function() {
-  return {
-    currency: this.currency,
-    balance: this.balance,
-    lockedBalance: this.lockedBalance,
-    availableBalance: this.availableBalance,
-    address: this.address,
-    isActive: this.isActive,
-    lastTransaction: this.lastTransaction,
-    transactionCount: this.transactionCount
-  };
-};
-
-module.exports = mongoose.model('Wallet', walletSchema);
+module.exports = Wallet;
