@@ -1,103 +1,58 @@
-const mongoose = require('mongoose');
+// In-memory storage for development
+const trades = new Map();
+let nextId = 1;
 
-const tradeSchema = new mongoose.Schema({
-  buyOrderId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Order',
-    required: true
-  },
-  sellOrderId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Order',
-    required: true
-  },
-  buyerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  sellerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  pair: {
-    type: String,
-    required: true,
-    uppercase: true
-  },
-  quantity: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  price: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  totalValue: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  fees: {
-    buyer: {
-      type: Number,
-      default: 0
-    },
-    seller: {
-      type: Number,
-      default: 0
-    },
-    total: {
-      type: Number,
-      default: 0
-    }
-  },
-  timestamp: {
-    type: Date,
-    default: Date.now
-  },
-  status: {
-    type: String,
-    enum: ['pending', 'completed', 'failed'],
-    default: 'pending'
+class Trade {
+  constructor(data) {
+    this._id = nextId++;
+    this.buyOrderId = data.buyOrderId;
+    this.sellOrderId = data.sellOrderId;
+    this.buyerId = data.buyerId;
+    this.sellerId = data.sellerId;
+    this.symbol = data.symbol;
+    this.amount = data.amount;
+    this.price = data.price;
+    this.total = data.total;
+    this.fee = data.fee || 0;
+    this.createdAt = new Date();
   }
-}, {
-  timestamps: true
-});
 
-// Indexes
-tradeSchema.index({ pair: 1, timestamp: -1 });
-tradeSchema.index({ buyerId: 1, timestamp: -1 });
-tradeSchema.index({ sellerId: 1, timestamp: -1 });
-tradeSchema.index({ buyOrderId: 1 });
-tradeSchema.index({ sellOrderId: 1 });
+  async save() {
+    trades.set(this._id, this);
+    return this;
+  }
 
-// Method to calculate fees
-tradeSchema.methods.calculateFees = function(makerFeeRate = 0.001, takerFeeRate = 0.001) {
-  // In a real implementation, you would determine maker/taker based on order book
-  // For simplicity, we'll assume both are takers
-  const feeRate = takerFeeRate;
-  
-  this.fees.buyer = this.totalValue * feeRate;
-  this.fees.seller = this.totalValue * feeRate;
-  this.fees.total = this.fees.buyer + this.fees.seller;
-};
+  static async findOne(query) {
+    for (const trade of trades.values()) {
+      if (query._id && trade._id === query._id) {
+        return trade;
+      }
+    }
+    return null;
+  }
 
-// Method to get trade summary
-tradeSchema.methods.getSummary = function() {
-  return {
-    id: this._id,
-    pair: this.pair,
-    quantity: this.quantity,
-    price: this.price,
-    totalValue: this.totalValue,
-    fees: this.fees,
-    timestamp: this.timestamp,
-    status: this.status
-  };
-};
+  static async find(query = {}) {
+    const results = [];
+    for (const trade of trades.values()) {
+      let matches = true;
+      for (const [key, value] of Object.entries(query)) {
+        if (trade[key] !== value) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        results.push(trade);
+      }
+    }
+    return results;
+  }
 
-module.exports = mongoose.model('Trade', tradeSchema);
+  static async create(data) {
+    const trade = new this(data);
+    await trade.save();
+    return trade;
+  }
+}
+
+module.exports = Trade;
